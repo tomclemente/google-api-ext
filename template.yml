@@ -1,0 +1,22 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  google-news-api
+
+Transform:
+- AWS::Serverless-2016-10-31
+
+Resources:
+  googlenewsapi:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: google-news-api
+      Handler: app.handler
+      Runtime: nodejs12.x
+      MemorySize: 128
+      Timeout: 200
+      Description: A Lambda function that handles the LeaseLocator Google News API.
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSLambdaVPCAccessExecutionRole
+        - AmazonRDSFullAccess
+        - AWSLambdaExecute
