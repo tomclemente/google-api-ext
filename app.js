@@ -18,6 +18,8 @@ var filename;
 var apilist = [];
 var resp = new Object();
 
+var browser = null;
+
 const BOOK_API = "https://www.googleapis.com/books/v1/volumes/";
 const YOUTUBE_API = "https://www.googleapis.com/youtube/v3/videos?id=";
 const PLACE_API = "https://maps.googleapis.com/maps/api/place/details/json?place_id=";
@@ -228,19 +230,30 @@ async function getFile(filename, type, id) {
     return response;
 }
 
+async function prepBrowser() {
+    browser = await chromium.puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath,
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+    });
+}
+
 async function takeScreenshot(id) {
-    let result = null;
-    let browser = null;
     let filename = id;
+    let response;
     
     try {
-        browser = await chromium.puppeteer.launch({
-            args: chromium.args,
-            defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath,
-            headless: chromium.headless,
-            ignoreHTTPSErrors: true,
-        });
+        if (browser == null) {
+            browser = await chromium.puppeteer.launch({
+                args: chromium.args,
+                defaultViewport: chromium.defaultViewport,
+                executablePath: await chromium.executablePath,
+                headless: chromium.headless,
+                ignoreHTTPSErrors: true,
+            });
+        }
 
         let page = await browser.newPage();
         await page.setUserAgent(agent);
@@ -248,7 +261,7 @@ async function takeScreenshot(id) {
 
         await page.goto(id);
         const buffer = await page.screenshot();
-        result = await page.title();
+        await page.title();
 
         filename = filename.replace(/(^\w+:|^)\/\//, '');
         filename = filename.replace(/\/$/, "");
@@ -261,7 +274,7 @@ async function takeScreenshot(id) {
             ACL: 'public-read'
         };
 
-        const response = await new Promise((resolve, reject) => {
+        response = await new Promise((resolve, reject) => {
             s3client.upload(params, function (s3Err, data) {
                 if (s3Err) {
                     console.log("File uploaded s3Err at: ", s3Err);
@@ -275,17 +288,15 @@ async function takeScreenshot(id) {
         });
 
         await page.close();
-        await browser.close();
-
-        return response;
-
+   
     } catch (error) {
-        console.log(error)
+        console.log(error);
+
     } finally {
-        if (browser !== null) {
-            await browser.close();
-        }
+        // if (browser !== null) {
+        //     await browser.close();
+        // }
     }
 
-    return result;
+    return response;
 }
