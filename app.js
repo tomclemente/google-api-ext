@@ -215,7 +215,7 @@ async function getFile(filename, type, id) {
                 let objectData = result.Body.toString('utf-8');
 
                 if (type == 'url') {
-                    resp["url_" + filename] = "https://" + dstBucket + ".s3.amazonaws.com/" + key;
+                    resp["url_" + filename] = "https://" + dstBucket + ".s3.amazonaws.com/" + encodeURIComponent(key);
                 } else {
                     resp[filename] = JSON.parse(JSON.parse(objectData));
                 }
@@ -276,6 +276,8 @@ async function takeScreenshot(id) {
 
         await page.close();
         await browser.close();
+
+        return response;
 
     } catch (error) {
         console.log(error)
