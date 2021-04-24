@@ -1,9 +1,11 @@
-const https = require('https');
 const aws = require('aws-sdk');
+const https = require('https');
+const chromium = require('chrome-aws-lambda');
+const agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36';
 
-const s3 = new aws.S3({
+const s3client = new aws.S3({
     accessKeyId: process.env.ACCESS_KEY,
-    secretAccessKey: process.env.SECRET_ACCESS_KEY
+    secretAccessKey: process.env.SECRET_KEY
 });
 
 var dstBucket = process.env.DST_BUCKET;
@@ -15,6 +17,10 @@ var filename;
 
 var apilist = [];
 var resp = new Object();
+
+const BOOK_API = "https://www.googleapis.com/books/v1/volumes/";
+const YOUTUBE_API = "https://www.googleapis.com/youtube/v3/videos?id=";
+const PLACE_API = "https://maps.googleapis.com/maps/api/place/details/json?place_id=";
 
 exports.handler = async (event, context) => {
 
@@ -29,7 +35,6 @@ exports.handler = async (event, context) => {
     const promisesAPI = [];
     let statusCode = '200';
     
-
     // enables CORS
     const headers = {
         'Content-Type': 'application/json',
@@ -44,24 +49,22 @@ exports.handler = async (event, context) => {
       
             switch (event.httpMethod) {
                 case 'POST':
-                    
                     apilist = new Array();
                     resp = new Object();
 
-                    for (var x = 0; x < params.length; x++) {                    
-                        id = params[x].id;
-                        type = params[x].type;                            
+                    for (var i = 0; i < params.length; i++) {                    
+                        id = params[i].id;
+                        type = params[i].type;                            
                         filename = type + "_" + id;
-                        
-                        switch (type) {    
-                            case 'place':
-                            case 'youtube':
-                            case 'book':                                
-                                promises.push(getFile(filename, type, id));
-                            break;
-                        }
-                    }
 
+                        if (type == 'url') {
+                            filename = filename.replace(/(^\w+:|^)\/\//, '');
+                            filename = filename.replace(/\/$/, "");
+                        }
+
+                        // check all requests if it exists in S3
+                        promises.push(getFile(filename, type, id));
+                    }
                 break;
 
                 default:
@@ -71,8 +74,31 @@ exports.handler = async (event, context) => {
             Promise.all(promises).then(function() {
                 console.log("final callAPI: ", apilist);
 
-                for (var x = 0; x < apilist.length; x++) {
-                    promisesAPI.push(callAPI("https://www.googleapis.com/books/v1/volumes/", apilist[x].type, apilist[x].id));
+                for (var i = 0; i < apilist.length; i++) {
+                    switch (apilist[i].type) {    
+                        case 'place':
+                            promisesAPI.push(callAPI(PLACE_API, 
+                                apilist[i].type, apilist[i].id));
+                        break;
+
+                        case 'youtube':
+                            promisesAPI.push(callAPI(YOUTUBE_API, 
+                                apilist[i].type, apilist[i].id));
+                        break;
+                        
+                        case 'book':                                
+                            promisesAPI.push(callAPI(BOOK_API, 
+                                apilist[i].type, apilist[i].id));
+                        break;
+
+                        case 'url':
+                            promisesAPI.push(takeScreenshot(apilist[i].id));
+                        break;
+
+                        default:
+                            throw new Error(`Unsupported type "${apilist[i].type}"`);
+                    }
+                   
                 }
      
                 Promise.all(promisesAPI).then(function() {
@@ -96,37 +122,38 @@ exports.handler = async (event, context) => {
         statusCode,
         body,
         headers,
-    };
+    };S
 }
 
 async function callAPI(url, type, id) {    
     let dataString = '';
-
-    console.log("URL: ", url);
-    console.log("FULLURL: ", url + "&key=" + API_KEY);
 
     var link = url + id;
     if (type == 'place' || type == "youtube") {
         link += "&key=" + API_KEY;
     }
 
-    console.log("LINK IS: ", link);
+    console.log("API link: ", link);
     
     const response = await new Promise((resolve, reject) => {
         const req = https.get(link , function(res) {
+
           res.on('data', chunk => {
             dataString += chunk;
           });
+
           res.on('end', () => {
+
             let name = type + "_" + id;
             resp[name] = JSON.parse(dataString);
+
             copyToS3(dataString, name).then(function() {
                 resolve({
                     statusCode: 200,
-                    //body: JSON.stringify(JSON.parse(dataString), null, 4)
                     body: JSON.parse(dataString)
                 });
             }, reject);
+
           });
         });
         
@@ -142,8 +169,6 @@ async function callAPI(url, type, id) {
 }
 
 async function copyToS3(content, filename) {
-    console.log("inside copyToS3 cotent: ", content);
-    console.log("inside copyToS3 filename: ", filename);
 
     const params = {
         Bucket: dstBucket,
@@ -151,10 +176,8 @@ async function copyToS3(content, filename) {
         Body: JSON.stringify(content, null, 2)
     };
 
-    console.log("inside copyToS3 params: ", params);
-
     const response = await new Promise((resolve, reject) => {
-        s3.upload(params, function(s3Err, data) {
+        s3client.upload(params, function(s3Err, data) {
             if (s3Err) {
                 reject(s3Err);
             } else {
@@ -168,43 +191,105 @@ async function copyToS3(content, filename) {
 }
 
 async function getFile(filename, type, id) {
+    
+    let key = filename + ".json";
+    if (type == 'url') {
+        key =  filename + ".png";
+    }
 
     const params = {
         Bucket: dstBucket,
-        Key: filename + ".json", 
+        Key: key, 
     };
 
-    const response = await new Promise((resolve, reject) => {
-        s3.headObject(params, function (err, metadata) {  
-            if (err && err.code === 'NotFound') { 
-                console.log("object not found"); 
-                //return false;
-                apilist.push({type: type, id: id});
-                resolve({statusCode: 404, data: "Object not found.", type: type, id: id});
-            } else {
+    console.log("Retrieving file in S3: ", key);
 
-                s3.getObject(params, function(err, result) {
-                    if (err) console.log(err, err.stack); // an error occurred
-                    else {
-                        let objectData = result.Body.toString('utf-8'); // Use the encoding necessary
-                        console.log("getobject objectData:", objectData);
-                        console.log("getobject JSON.parse(objectData):", JSON.parse(objectData));
-                        //console.log("getobject jsonEscape(objectData):", jsonEscape(objectData));
-                        resp[filename] = JSON.parse(jsonEscape(objectData));
-                        resolve({statusCode: 200, data: objectData, type: type, id: id});              
-                    }
-                });              
+    const response = await new Promise((resolve, reject) => {
+        s3client.getObject(params, function(err, result) {
+            if (err) {
+                console.log(err, err.stack);
+                apilist.push({type: type, id: id});
+                resolve({statusCode: 404, data: "Object not found.", err: err.stack});
+
+            } else {
+                let objectData = result.Body.toString('utf-8');
+
+                if (type == 'url') {
+                    resp["url_" + filename] = "https://" + dstBucket + ".s3.amazonaws.com/" + key;
+                } else {
+                    resp[filename] = JSON.parse(JSON.parse(objectData));
+                }
+                
+                resolve({statusCode: 200, data: objectData, type: type, id: id});              
             }
-        });          
+        });    
     });
 
     return response;
 }
 
-function jsonEscape2(str)  {
-    return str.replace(/\n/g, "\\\\n").replace(/\r/g, "\\\\r").replace(/\t/g, "\\\\t");
-}
+async function takeScreenshot(id) {
+    let result = null;
+    let browser = null;
+    let filename = id;
+    
+    try {
+        browser = await chromium.puppeteer.launch({
+            args: chromium.args,
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath,
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true,
+        });
 
-function jsonEscape(str)  {
-    return str.replace(/\\n/g, '');
+        let page = await browser.newPage();
+        await page.setUserAgent(agent)
+
+        console.log('Navigating to page: ', id)
+
+        await page.goto(id)
+        const buffer = await page.screenshot()
+        result = await page.title()
+
+        
+        console.log("old filename: ", filename);
+        filename = filename.replace(/(^\w+:|^)\/\//, '');
+        filename = filename.replace(/\/$/, "");
+        console.log("new filename: ", filename);
+
+        const params = {
+            Bucket: dstBucket,
+            Key: filename + ".png",
+            Body: buffer,
+            ContentType: 'image/png',
+            ACL: 'public-read'
+        };
+
+        const response = await new Promise((resolve, reject) => {
+            s3client.upload(params, function (s3Err, data) {
+                if (s3Err) {
+                    console.log("File uploaded s3Err at: ", s3Err);
+                    reject(s3Err);
+                } else {
+                    resp["url_" + filename] = data.Location;
+                    console.log(`File uploaded successfully at ${data.Location}`);
+                    resolve();
+                }
+            });
+        });
+
+        console.log('S3 image URL:', response)
+
+        await page.close();
+        await browser.close();
+
+    } catch (error) {
+        console.log(error)
+    } finally {
+        if (browser !== null) {
+            await browser.close();
+        }
+    }
+
+    return result;
 }

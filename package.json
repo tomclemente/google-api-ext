@@ -1,13 +1,12 @@
 {
-    "name": "google-news-api",
-    "description": "LeaseLocator Google News API",
+    "name": "google-ext-api",
+    "description": "Google Ext API",
     "main": "app.js",
     "version": "1.0",
     "private": true,
     "dependencies": {
         "aws-sdk": "^2.742.0",
-        "axios": "^0.20.0",
-        "fs": "^0.0.1-security",
+        "chrome-aws-lambda": "^8.0.2",
         "https": "^1.0.0"
     }
 }
