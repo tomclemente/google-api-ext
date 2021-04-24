@@ -243,19 +243,15 @@ async function takeScreenshot(id) {
         });
 
         let page = await browser.newPage();
-        await page.setUserAgent(agent)
+        await page.setUserAgent(agent);
+        console.log('Navigating to page: ', id);
 
-        console.log('Navigating to page: ', id)
+        await page.goto(id);
+        const buffer = await page.screenshot();
+        result = await page.title();
 
-        await page.goto(id)
-        const buffer = await page.screenshot()
-        result = await page.title()
-
-        
-        console.log("old filename: ", filename);
         filename = filename.replace(/(^\w+:|^)\/\//, '');
         filename = filename.replace(/\/$/, "");
-        console.log("new filename: ", filename);
 
         const params = {
             Bucket: dstBucket,
@@ -277,8 +273,6 @@ async function takeScreenshot(id) {
                 }
             });
         });
-
-        console.log('S3 image URL:', response)
 
         await page.close();
         await browser.close();
