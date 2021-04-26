@@ -12,7 +12,7 @@ Resources:
       FunctionName: google-news-api
       Handler: app.handler
       Runtime: nodejs12.x
-      MemorySize: 4096
+      MemorySize: 8192
       Timeout: 200
       Description: A Lambda function that handles the LeaseLocator Google News API.
       Policies:
