@@ -102,11 +102,14 @@ exports.handler = async (event, context) => {
                         default:
                             throw new Error(`Unsupported type "${apilist[i].type}"`);
                     }
-
                 }
 
-                Promise.all(promisesAPI).then(function () {
+                Promise.all(promisesAPI).then(async function () {
                     console.log("resp: ", resp);
+                    if (browser !== null) {
+                        await browser.close();
+                        browser = null;
+                    }
                     resolve(resp);
                 });
             });
@@ -222,30 +225,6 @@ async function callPlacePhotosAPI(photoReference) {
         });
     });
 
-    // const params = {
-    //     Bucket: dstBucket,
-    //     Key: "place_" + photoReference + ".png",
-    //     Body: buffer,
-    //     ContentType: 'image/png',
-    //     ACL: 'public-read'
-    // };
-
-    // const uploadResponse = await new Promise((resolve, reject) => {
-    //     s3client.upload(params, function (s3Err, data) {
-    //         if (s3Err) {
-    //             console.log("File uploaded s3Err at: ", s3Err);
-    //             reject(s3Err);
-    //         } else {
-    //             //resp["url_" + filename] = data.Location;
-    //             console.log(`File uploaded successfully at ${data.Location}`);
-    //             resolve({
-    //                 statusCode: 200,
-    //                 location: data.Location
-    //             });
-    //         }
-    //     });
-    // });
-
     return response;
 }
 
@@ -286,9 +265,14 @@ async function getFile(filename, type, id) {
     console.log("Retrieving file in S3: ", key);
 
     const response = await new Promise((resolve, reject) => {
-        s3client.getObject(params, function (err, result) {
+        s3client.getObject(params, async function (err, result) {
             if (err) {
                 console.log(err, err.stack);
+
+                if (type == 'url') {
+                    await initiateBrowser();
+                } 
+                
                 apilist.push({ type: type, id: id });
                 resolve({ statusCode: 404, data: "Object not found.", err: err.stack });
 
@@ -309,22 +293,10 @@ async function getFile(filename, type, id) {
     return response;
 }
 
-async function prepBrowser() {
-    browser = await chromium.puppeteer.launch({
-        args: chromium.args,
-        defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath,
-        headless: chromium.headless,
-        ignoreHTTPSErrors: true,
-    });
-}
-
-async function takeScreenshot(id) {
-    let filename = id;
-    let response;
-
-    try {
-        if (browser == null) {
+async function initiateBrowser() {
+    if (browser == null) {
+        try {
+            console.log("Initiating browser");
             browser = await chromium.puppeteer.launch({
                 args: chromium.args,
                 defaultViewport: chromium.defaultViewport,
@@ -332,8 +304,23 @@ async function takeScreenshot(id) {
                 headless: chromium.headless,
                 ignoreHTTPSErrors: true,
             });
+        } catch(err) {
+            console.log("Browser failed: ", err);
+        } finally {
+            console.log("Browser launched:", browser);
+            return browser;
         }
+    }
+}
 
+async function takeScreenshot(id) {
+    let filename = id;
+    let response;
+
+    try {
+
+        await initiateBrowser();
+        
         let page = await browser.newPage();
         await page.setUserAgent(agent);
         console.log('Navigating to page: ', id);
@@ -372,10 +359,11 @@ async function takeScreenshot(id) {
         console.log(error);
 
     } finally {
-        if (browser !== null) {
-            await browser.close();
-        }
-    }
+        // if (browser !== null) {
+        //     await browser.close();
+        //     browser = null;
+        // }
 
-    return response;
+        return response;
+    }
 }
