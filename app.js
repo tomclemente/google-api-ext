@@ -175,9 +175,11 @@ async function callAPI(url, type, id) {
     } else if (type == 'place') {
         result = result['result'];
 
-        for (var x = 0; x < result.photos.length; x++) {
-            let resp = await callPlacePhotosAPI(result.photos[x].photo_reference);
-            result.photos[x]["url"] = resp.body;
+        if (result.photos != null) {
+            for (var x = 0; x < result.photos.length; x++) {
+                let resp = await callPlacePhotosAPI(result.photos[x].photo_reference);
+                result.photos[x]["url"] = resp.body;
+            }
         }
     }
 
