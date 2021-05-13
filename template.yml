@@ -5,8 +5,33 @@ Description: >-
 Transform:
 - AWS::Serverless-2016-10-31
 
+
+Parameters:
+  apiGatewayName:
+    Type: String
+    Default: google-api-ext
+  apiGatewayStageName:
+    Type: String
+    AllowedPattern: "[a-z0-9]+"
+    Default: prod
+  apiGatewayHTTPMethod:
+    Type: String
+    Default: POST
+  lambdaFunctionName:
+    Type: String
+    AllowedPattern: "[a-zA-Z0-9]+[a-zA-Z0-9-]+[a-zA-Z0-9]+"
+    Default: google-news-api
+  s3BucketName:
+    Type: String
+  accessKey:
+    Type: String
+  secretKey:
+    Type: String
+  googleAPIKey:
+    Type: String
+
 Resources:
-  googlenewsapi:
+  lambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: google-news-api
@@ -14,10 +39,98 @@ Resources:
       Runtime: nodejs12.x
       MemorySize: 8192
       Timeout: 200
-      Description: A Lambda function that handles the LeaseLocator Google News API.
+      Description: A Lambda function that scrapes the Google API.
       Policies:
         - AWSLambdaBasicExecutionRole
-        - AWSLambdaVPCAccessExecutionRole
-        - AmazonRDSFullAccess
         - AWSLambdaExecute
+      Environment:
+        Variables:
+          ACCESS_KEY: !Ref accessKey
+          SECRET_KEY: !Ref secretKey
+          DST_BUCKET: !Ref s3BucketName
+          API_KEY: !Ref googleAPIKey
 
+  apiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: API Gateway for google-news-api Lambda function.
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Name: !Ref apiGatewayName
+
+  apiGatewayRootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: !Ref apiGatewayHTTPMethod
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub
+          - arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${lambdaArn}/invocations
+          - lambdaArn: !GetAtt lambdaFunction.Arn
+      ResourceId: !GetAtt apiGateway.RootResourceId
+      RestApiId: !Ref apiGateway
+
+  apiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - apiGatewayRootMethod
+    Properties:
+      RestApiId: !Ref apiGateway
+      StageName: !Ref apiGatewayStageName
+
+  s3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: PublicReadWrite
+      BucketName: !Ref s3BucketName
+
+  lambdaApiGatewayInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt lambdaFunction.Arn
+      Principal: apigateway.amazonaws.com
+      # note: if route *not* at API Gateway root, `SourceArn` would take the form of:
+      #               arn:aws:execute-api:us-east-1:${AWS::AccountId}:${apiGateway}/${apiGatewayStageName}/${apiGatewayHTTPMethod}/PATH_PART
+      SourceArn: !Sub arn:aws:execute-api:us-east-1:${AWS::AccountId}:${apiGateway}/${apiGatewayStageName}/${apiGatewayHTTPMethod}/
+
+  lambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Policies:
+        - PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/aws/lambda/${lambdaFunctionName}:*
+          PolicyName: lambda
+
+  lambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${lambdaFunctionName}
+      RetentionInDays: 90
+
+Outputs:
+  apiGatewayInvokeURL:
+    Value: !Sub https://${apiGateway}.execute-api.us-east-1.amazonaws.com/${apiGatewayStageName}
+
+  lambdaArn:
+    Value: !GetAtt lambdaFunction.Arn

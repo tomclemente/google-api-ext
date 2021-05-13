@@ -169,8 +169,12 @@ async function callAPI(url, type, id) {
         });
     });
 
+    console.log("before result: ", result);
+
     if (type == 'youtube') {
-        result['items'] = result.items[0];
+        if (result.items != null && result.items != undefined) {
+            result['items'] = result.items[0];
+        }
 
     } else if (type == 'place') {
         result = result['result'];
